@@ -14,7 +14,7 @@ func handleUserDraw(userID int64, msg string) (string, bool, error) {
 	// Sample image by link
 	reqUrl := openai.ImageRequest{
 		Prompt:         msg,
-		Size:           openai.CreateImageSize256x256,
+		Size:           openai.CreateImageSize512x512,
 		ResponseFormat: openai.CreateImageResponseFormatURL,
 		N:              1,
 	}
