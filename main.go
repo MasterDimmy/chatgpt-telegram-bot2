@@ -163,7 +163,7 @@ func main() {
 
 func send(bot *tgbotapi.BotAPI, c tgbotapi.Chattable) error {
 	msg, err := bot.Send(c)
-	if err == nil {
+	if err == nil && msg.Chat != nil {
 		users[msg.Chat.ID].LatestMessage = msg
 	}
 
