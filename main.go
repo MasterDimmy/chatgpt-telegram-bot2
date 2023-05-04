@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"time"
 
 	"github.com/caarlos0/env/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	gogpt "github.com/sashabaranov/go-gpt3"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 var cfg struct {
@@ -27,11 +28,13 @@ var cfg struct {
 type User struct {
 	TelegramID     int64
 	LastActiveTime time.Time
-	HistoryMessage []gogpt.ChatCompletionMessage
+	HistoryMessage []openai.ChatCompletionMessage
 	//	LatestMessage  tgbotapi.Message
 }
 
 var users = make(map[int64]*User)
+
+var openAIClient = openai.NewClient(os.Getenv("OPENAI_API_KEY"))
 
 func main() {
 	if err := env.Parse(&cfg); err != nil {
@@ -51,11 +54,11 @@ func main() {
 	_, _ = bot.Request(tgbotapi.NewSetMyCommands([]tgbotapi.BotCommand{
 		{
 			Command:     "help",
-			Description: "Get help",
+			Description: "Справка",
 		},
 		{
 			Command:     "new",
-			Description: "Clear context and start a new conversation",
+			Description: "Очистить контекст",
 		},
 	}...))
 
@@ -123,7 +126,7 @@ func main() {
 			case "start":
 				msg.Text = "Welcome to ChatGPT bot! Write something to start a conversation. Use /new to clear context and start a new conversation."
 			case "help":
-				msg.Text = "Write something to start a conversation. Use /new to clear context and start a new conversation."
+				msg.Text = "Напиши что-нибудь для начала общения. /new  очистить контекст, \"нарисуй\" для рисования"
 			case "new":
 				resetUser(update.Message.From.ID)
 				msg.Text = "OK, let's start a new conversation."
@@ -135,7 +138,16 @@ func main() {
 				log.Print(err)
 			}
 		} else {
-			answerText, contextTrimmed, err := handleUserPrompt(update.Message.From.ID, update.Message.Text)
+			msg := update.Message.Text
+
+			handler := handleUserPrompt
+
+			if strings.Index(strings.ToLower(msg), "нарисуй ") == 0 {
+				msg = strings.TrimSpace(msg[len("нарисуй"):])
+				handler = handleUserDraw
+			}
+
+			answerText, contextTrimmed, err := handler(update.Message.From.ID, update.Message.Text)
 			if err != nil {
 				log.Print(err)
 
@@ -178,21 +190,18 @@ func handleUserPrompt(userID int64, msg string) (string, bool, error) {
 		users[userID] = &User{
 			TelegramID:     userID,
 			LastActiveTime: time.Now(),
-			HistoryMessage: []gogpt.ChatCompletionMessage{},
+			HistoryMessage: []openai.ChatCompletionMessage{},
 		}
 	}
 
-	users[userID].HistoryMessage = append(users[userID].HistoryMessage, gogpt.ChatCompletionMessage{
+	users[userID].HistoryMessage = append(users[userID].HistoryMessage, openai.ChatCompletionMessage{
 		Role:    "user",
 		Content: msg,
 	})
 	users[userID].LastActiveTime = time.Now()
 
-	c := gogpt.NewClient(os.Getenv("OPENAI_API_KEY"))
-	ctx := context.Background()
-
-	req := gogpt.ChatCompletionRequest{
-		Model:       gogpt.GPT3Dot5Turbo,
+	req := openai.ChatCompletionRequest{
+		Model:       openai.GPT3Dot5Turbo,
 		Temperature: cfg.ModelTemperature,
 		TopP:        1,
 		N:           1,
@@ -203,7 +212,7 @@ func handleUserPrompt(userID int64, msg string) (string, bool, error) {
 
 	fmt.Println(req)
 
-	resp, err := c.CreateChatCompletion(ctx, req)
+	resp, err := openAIClient.CreateChatCompletion(context.Background(), req)
 	if err != nil {
 		log.Print(err)
 		users[userID].HistoryMessage = users[userID].HistoryMessage[:len(users[userID].HistoryMessage)-1]
