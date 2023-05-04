@@ -13,7 +13,7 @@ func handleUserDraw(userID int64, msg string) (string, bool, error) {
 
 	// Sample image by link
 	reqUrl := openai.ImageRequest{
-		Prompt:         "Parrot on a skateboard performs a trick, cartoon style, natural light, high detail",
+		Prompt:         msg,
 		Size:           openai.CreateImageSize256x256,
 		ResponseFormat: openai.CreateImageResponseFormatURL,
 		N:              1,
