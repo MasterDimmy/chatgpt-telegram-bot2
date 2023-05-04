@@ -28,7 +28,7 @@ type User struct {
 	TelegramID     int64
 	LastActiveTime time.Time
 	HistoryMessage []gogpt.ChatCompletionMessage
-	LatestMessage  tgbotapi.Message
+	//	LatestMessage  tgbotapi.Message
 }
 
 var users = make(map[int64]*User)
@@ -62,17 +62,18 @@ func main() {
 	// check user context expiration every 5 seconds
 	go func() {
 		for {
-			for userID, user := range users {
+			for userID, _ := range users {
 				cleared := clearUserContextIfExpires(userID)
 				if cleared {
-					lastMessage := user.LatestMessage
+					///lastMessage := user.LatestMessage
 					if cfg.NotifyUserOnConversationIdleTimeout {
-						msg := tgbotapi.NewEditMessageText(userID, lastMessage.MessageID, lastMessage.Text+"\n\nContext cleared due to inactivity.")
-						_, _ = bot.Send(msg)
+						//msg := tgbotapi.NewEditMessageText(userID, lastMessage.MessageID, lastMessage.Text+"\n\nContext cleared due to inactivity.")
+						//msg := tgbotapi.NewEditMessageText(user., lastMessage.MessageID, "Context cleared due to inactivity.")
+						//_, _ = bot.Send(msg)
 					}
 				}
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(time.Minute)
 		}
 	}()
 
@@ -164,7 +165,7 @@ func main() {
 func send(bot *tgbotapi.BotAPI, c tgbotapi.Chattable) error {
 	msg, err := bot.Send(c)
 	if err == nil && msg.Chat != nil {
-		users[msg.Chat.ID].LatestMessage = msg
+		//users[msg.Chat.ID].LatestMessage = msg
 	}
 
 	return err
