@@ -1,6 +1,6 @@
 module chatgptbot
 
-go 1.21.5
+go 1.21.9
 
 require (
 	github.com/MasterDimmy/zipologger v0.3.7

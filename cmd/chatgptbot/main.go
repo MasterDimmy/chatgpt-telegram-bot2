@@ -26,14 +26,13 @@ var cfg struct {
 	TelegramAPIToken                    string  `env:"TELEGRAM_APITOKEN,required"`
 	OpenAIAPIKey                        string  `env:"OPENAI_API_KEY,required"`
 	ModelTemperature                    float32 `env:"MODEL_TEMPERATURE" envDefault:"1.0"`
-	AllowedTelegramID                   []int64 `env:"ALLOWED_TELEGRAM_ID" envSeparator:","`
 	ConversationIdleTimeoutSeconds      int     `env:"CONVERSATION_IDLE_TIMEOUT_SECONDS" envDefault:"900"`
 	NotifyUserOnConversationIdleTimeout bool    `env:"NOTIFY_USER_ON_CONVERSATION_IDLE_TIMEOUT" envDefault:"false"`
 }
 
 type Config struct {
-	AdminTgID    []int64
-	AllowedUsers []int64
+	AdminTelegramID    []int64
+	AllowedTelegramID []int64
 }
 
 var config Config
