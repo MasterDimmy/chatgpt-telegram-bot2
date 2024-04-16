@@ -32,7 +32,7 @@ var cfg struct {
 }
 
 type Config struct {
-	AdminTgID    int64
+	AdminTgID    []int64
 	AllowedUsers []int64
 }
 
@@ -132,6 +132,10 @@ func main() {
 			continue
 		}
 
+		isAdmin := func(id int64) bool {
+			return slices.Index(config.AdminTgID, id) != -1
+		}
+
 		log := zipologger.NewLogger("./logs/user_"+update.SentFrom().UserName+".log", 10, 10, 10, false)
 		log.Printf("=> %s %s", update.Message.Text, update.Message.Command())
 
@@ -197,7 +201,7 @@ func main() {
 			case "help":
 				msg.Text = "Напиши что-нибудь для начала общения. /new  очистить контекст, \"нарисуй\" для рисования"
 			case "listusers":
-				if update.Message.From.ID != config.AdminTgID {
+				if !isAdmin(update.Message.From.ID) {
 					msg.Text = "action not allowed"
 				} else {
 					msg.Text = "Connected users:\n"
@@ -210,7 +214,7 @@ func main() {
 					}
 				}
 			case "adduser":
-				if update.Message.From.ID != config.AdminTgID {
+				if !isAdmin(update.Message.From.ID) {
 					msg.Text = "action not allowed"
 				} else {
 					func() {
@@ -247,7 +251,7 @@ func main() {
 					}()
 				}
 			case "removeuser":
-				if update.Message.From.ID != config.AdminTgID {
+				if !isAdmin(update.Message.From.ID) {
 					msg.Text = "action not allowed"
 				} else {
 					func() {
@@ -267,6 +271,11 @@ func main() {
 							msg.Text = "provide user ID"
 							//msg.Text = fmt.Sprintf("incorrect newid: %d %v", newid, err)
 							log.Println(msg.Text)
+							return
+						}
+
+						if isAdmin(newid) {
+							msg.Text = "cant remove admin"
 							return
 						}
 
