@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"io/ioutil"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 
 	"time"
 
 	"chatgptbot/pkg/openai"
 
+	"github.com/MasterDimmy/zipologger"
 	"github.com/caarlos0/env/v7"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -27,6 +31,13 @@ var cfg struct {
 	NotifyUserOnConversationIdleTimeout bool    `env:"NOTIFY_USER_ON_CONVERSATION_IDLE_TIMEOUT" envDefault:"false"`
 }
 
+type Config struct {
+	AdminTgID    int64
+	AllowedUsers []int64
+}
+
+var config Config
+
 type User struct {
 	TelegramID     int64
 	LastActiveTime time.Time
@@ -38,7 +49,19 @@ var users = make(map[int64]*User)
 
 var openAIClient = openai.NewClient(os.Getenv("OPENAI_API_KEY"))
 
+var log = zipologger.NewLogger("./logs/actions.log", 5, 5, 5, false)
+
 func main() {
+	defer zipologger.HandlePanic()
+
+	buf, err := ioutil.ReadFile("config.cfg")
+	if err != nil {
+		log.Printf("error: %s\n", err.Error())
+		return
+	}
+	json.Unmarshal(buf, &config)
+	cfg.AllowedTelegramID = config.AllowedUsers
+
 	if err := env.Parse(&cfg); err != nil {
 		fmt.Printf("%+v\n", err)
 		os.Exit(1)
@@ -56,16 +79,30 @@ func main() {
 	_, _ = bot.Request(tgbotapi.NewSetMyCommands([]tgbotapi.BotCommand{
 		{
 			Command:     "help",
-			Description: "Справка",
+			Description: "Help",
 		},
 		{
 			Command:     "new",
-			Description: "Очистить контекст",
+			Description: "Clear context",
+		},
+		{
+			Command:     "listusers",
+			Description: "List allowed users (only admin)",
+		},
+		{
+			Command:     "adduser",
+			Description: "Add user (only admin)",
+		},
+		{
+			Command:     "removeuser",
+			Description: "Remove user (only admin)",
 		},
 	}...))
 
 	// check user context expiration every 5 seconds
 	go func() {
+		defer zipologger.HandlePanic()
+
 		for {
 			for userID, _ := range users {
 				cleared := clearUserContextIfExpires(userID)
@@ -87,10 +124,18 @@ func main() {
 
 	updates := bot.GetUpdatesChan(u)
 
+	users := make(map[int64]string)
+	var mutex sync.Mutex
+
 	for update := range updates {
 		if update.Message == nil { // ignore any non-Message updates
 			continue
 		}
+
+		log := zipologger.NewLogger("./logs/user_"+update.SentFrom().UserName+".log", 10, 10, 10, false)
+		log.Printf("=> %s %s", update.Message.Text, update.Message.Command())
+
+		users[update.SentFrom().ID] = update.SentFrom().UserName
 
 		_, err := bot.Send(tgbotapi.NewChatAction(update.Message.Chat.ID, tgbotapi.ChatTyping))
 		if err != nil {
@@ -115,13 +160,32 @@ func main() {
 			if !userAllowed {
 				_, err := bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("You are not allowed to use this bot. User ID: %d", update.Message.Chat.ID)))
 				if err != nil {
-					log.Print(err)
+					log.Print(err.Error())
 				}
 				continue
 			}
 		}
 
-		if update.Message.IsCommand() { // ignore any non-command Messages
+		/*
+			if update.PollAnswer != nil {
+				log.Printf("poll answer got: opt id: %+v from: %s", update.PollAnswer.OptionIDs, update.SentFrom().UserName)
+			}
+		*/
+
+		/*
+			poll := tgbotapi.NewPoll(msg.ChatID, "pool question", "opt1", "opt2")
+							poll.AllowsMultipleAnswers = false
+							poll.OpenPeriod = 60
+							poll.ChatID = msg.ChatID
+
+							//msg.ChannelUsername
+
+							if _, err := bot.Send(poll); err != nil {
+								log.Printf("Error sending command response: %v", err)
+							}
+		*/
+
+		if update.Message != nil && update.Message.IsCommand() { // ignore any non-command Messages
 			// Create a new MessageConfig. We don't have text yet,
 			// so we leave it empty.
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
@@ -132,6 +196,103 @@ func main() {
 				msg.Text = "Welcome to ChatGPT bot! Write something to start a conversation. Use /new to clear context and start a new conversation."
 			case "help":
 				msg.Text = "Напиши что-нибудь для начала общения. /new  очистить контекст, \"нарисуй\" для рисования"
+			case "listusers":
+				if update.Message.From.ID != config.AdminTgID {
+					msg.Text = "action not allowed"
+				} else {
+					msg.Text = "Connected users:\n"
+					for id, name := range users {
+						msg.Text += fmt.Sprintf("%d - %s\n", id, name)
+					}
+					msg.Text += "Allowed users:\n"
+					for _, id := range config.AllowedUsers {
+						msg.Text += fmt.Sprintf("%d\n", id)
+					}
+				}
+			case "adduser":
+				if update.Message.From.ID != config.AdminTgID {
+					msg.Text = "action not allowed"
+				} else {
+					func() {
+						mutex.Lock()
+						defer mutex.Unlock()
+
+						args := strings.Split(update.Message.CommandArguments(), " ")
+
+						if len(args) < 1 {
+							msg.Text = "provide user ID"
+							log.Println(msg.Text)
+							return
+						}
+
+						newid, err := strconv.ParseInt(args[0], 10, 64)
+						if err != nil || newid == 0 {
+							msg.Text = fmt.Sprintf("incorrect newid: %d %v", newid, err)
+							log.Println(msg.Text)
+							return
+						}
+
+						config.AllowedUsers = append(config.AllowedUsers, newid)
+						config.AllowedUsers = slices.Compact(config.AllowedUsers)
+
+						buf, _ := json.Marshal(&config)
+						err = ioutil.WriteFile("config.cfg", buf, 0644)
+						if err != nil {
+							msg.Text = fmt.Sprintf("error: %s\n", err.Error())
+							log.Println(msg.Text)
+							return
+						}
+
+						msg.Text = fmt.Sprintf("user ID %d added successfully", newid)
+					}()
+				}
+			case "removeuser":
+				if update.Message.From.ID != config.AdminTgID {
+					msg.Text = "action not allowed"
+				} else {
+					func() {
+						mutex.Lock()
+						defer mutex.Unlock()
+
+						args := strings.Split(update.Message.CommandArguments(), " ")
+
+						if len(args) < 1 {
+							msg.Text = "provide user ID"
+							log.Println(msg.Text)
+							return
+						}
+
+						newid, err := strconv.ParseInt(args[0], 10, 64)
+						if err != nil || newid == 0 {
+							msg.Text = "provide user ID"
+							//msg.Text = fmt.Sprintf("incorrect newid: %d %v", newid, err)
+							log.Println(msg.Text)
+							return
+						}
+
+						removed := false
+						config.AllowedUsers = slices.DeleteFunc(config.AllowedUsers, func(val int64) bool {
+							r := val == newid
+							removed = removed || r
+							return r
+						})
+
+						if !removed {
+							msg.Text = fmt.Sprintf("user ID %d not found", newid)
+							return
+						}
+
+						buf, _ := json.Marshal(&config)
+						err = ioutil.WriteFile("config.cfg", buf, 0644)
+						if err != nil {
+							msg.Text = fmt.Sprintf("error: %s\n", err.Error())
+							log.Println(msg.Text)
+							return
+						}
+
+						msg.Text = fmt.Sprintf("user ID %d removed successfully", newid)
+					}()
+				}
 			case "new":
 				resetUser(update.Message.From.ID)
 				msg.Text = "OK, let's start a new conversation."
@@ -139,6 +300,7 @@ func main() {
 				msg.Text = "I don't know that command"
 			}
 
+			log.Printf("<= %s", msg.Text)
 			if _, err := bot.Send(msg); err != nil {
 				log.Printf("Error sending command response: %v", err)
 			}
@@ -153,17 +315,19 @@ func main() {
 			}
 
 			answerText, contextTrimmed, err := handler(update.Message.From.ID, update.Message.Text)
+			log.Printf("<= %s %t %v", answerText, contextTrimmed, err)
+
 			if err != nil {
-				log.Print(err)
+				log.Print(err.Error())
 
 				err = send(bot, tgbotapi.NewMessage(update.Message.Chat.ID, err.Error()))
 				if err != nil {
-					log.Print(err)
+					log.Print(err.Error())
 				}
 			} else {
 				err = send(bot, tgbotapi.NewMessage(update.Message.Chat.ID, answerText))
 				if err != nil {
-					log.Print(err)
+					log.Print(err.Error())
 				}
 
 				if contextTrimmed {
@@ -171,7 +335,7 @@ func main() {
 					msg.DisableNotification = true
 					err = send(bot, msg)
 					if err != nil {
-						log.Print(err)
+						log.Print(err.Error())
 					}
 				}
 			}
@@ -219,7 +383,7 @@ func handleUserPrompt(userID int64, msg string) (string, bool, error) {
 
 	resp, err := openAIClient.CreateChatCompletion(context.Background(), req)
 	if err != nil {
-		log.Print(err)
+		log.Print(err.Error())
 		users[userID].HistoryMessage = users[userID].HistoryMessage[:len(users[userID].HistoryMessage)-1]
 		return "", false, err
 	}
