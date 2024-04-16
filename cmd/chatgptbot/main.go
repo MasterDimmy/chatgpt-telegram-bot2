@@ -11,9 +11,11 @@ import (
 
 	"time"
 
+	"chatgptbot/pkg/openai"
+
 	"github.com/caarlos0/env/v7"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 var cfg struct {
@@ -96,7 +98,10 @@ func main() {
 			// So we need to check if it's an unmarshal error and ignore it.
 			var unmarshalError *json.UnmarshalTypeError
 			if !errors.As(err, &unmarshalError) {
-				log.Print(err)
+				if err != nil {
+					log.Printf("Error in sending message: %v", err) // Более подробное логирование ошибок
+					continue                                        // Продолжить цикл в случае ошибки
+				}
 			}
 		}
 
@@ -135,7 +140,7 @@ func main() {
 			}
 
 			if _, err := bot.Send(msg); err != nil {
-				log.Print(err)
+				log.Printf("Error sending command response: %v", err)
 			}
 		} else {
 			msg := update.Message.Text

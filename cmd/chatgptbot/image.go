@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	openai "github.com/sashabaranov/go-openai"
+	"chatgptbot/pkg/openai"
 )
 
 func handleUserDraw(userID int64, msg string) (string, bool, error) {
