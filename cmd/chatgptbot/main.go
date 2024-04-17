@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"chatgptbot/pkg/openai"
+	"chatgptbot/pkg/slices"
 
 	"github.com/MasterDimmy/zipologger"
 	"github.com/caarlos0/env/v7"
@@ -59,7 +59,6 @@ func main() {
 		return
 	}
 	json.Unmarshal(buf, &config)
-	cfg.AllowedTelegramID = config.AllowedUsers
 
 	if err := env.Parse(&cfg); err != nil {
 		fmt.Printf("%+v\n", err)
@@ -132,7 +131,7 @@ func main() {
 		}
 
 		isAdmin := func(id int64) bool {
-			return slices.Index(config.AdminTgID, id) != -1
+			return slices.Index(config.AdminTelegramID, id) != -1
 		}
 
 		log := zipologger.NewLogger("./logs/user_"+update.SentFrom().UserName+".log", 10, 10, 10, false)
@@ -153,9 +152,9 @@ func main() {
 			}
 		}
 
-		if len(cfg.AllowedTelegramID) != 0 {
+		if len(config.AllowedTelegramID) != 0 {
 			var userAllowed bool
-			for _, allowedID := range cfg.AllowedTelegramID {
+			for _, allowedID := range config.AllowedTelegramID {
 				if allowedID == update.Message.Chat.ID {
 					userAllowed = true
 				}
@@ -208,7 +207,7 @@ func main() {
 						msg.Text += fmt.Sprintf("%d - %s\n", id, name)
 					}
 					msg.Text += "Allowed users:\n"
-					for _, id := range config.AllowedUsers {
+					for _, id := range config.AllowedTelegramID {
 						msg.Text += fmt.Sprintf("%d\n", id)
 					}
 				}
@@ -235,8 +234,8 @@ func main() {
 							return
 						}
 
-						config.AllowedUsers = append(config.AllowedUsers, newid)
-						config.AllowedUsers = slices.Compact(config.AllowedUsers)
+						config.AllowedTelegramID = append(config.AllowedTelegramID, newid)
+						config.AllowedTelegramID = slices.Compact(config.AllowedTelegramID)
 
 						buf, _ := json.Marshal(&config)
 						err = ioutil.WriteFile("config.cfg", buf, 0644)
@@ -279,7 +278,7 @@ func main() {
 						}
 
 						removed := false
-						config.AllowedUsers = slices.DeleteFunc(config.AllowedUsers, func(val int64) bool {
+						config.AllowedTelegramID = slices.DeleteFunc(config.AllowedTelegramID, func(val int64) bool {
 							r := val == newid
 							removed = removed || r
 							return r
